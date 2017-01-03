@@ -28,14 +28,19 @@ import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Display;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.w3c.dom.Text;
+
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Queue;
 import java.util.UUID;
@@ -48,6 +53,7 @@ public class MainActivity extends AppCompatActivity {
     TextView deviceNameText;
     TextView deviceAddressText;
     TextView deviceRssiText;
+    TextView logText;
 
 
     private int REQUEST_ENABLE_BT = 1;
@@ -59,7 +65,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean mBonding = false;
     private boolean mConnecting = false;
     private boolean mDiscovering = false;
-    private TaskQueue mTaskQueue = new TaskQueue();
+    private ArrayList<ArrayList<BluetoothGattCharacteristic>> mGattCharacteristics;
 
     public final static int BLUETOOTH_PERMISSION = 0x1000;
     public final static int BLUETOOTH_ADMIN_PERMISSION = 0x1001;
@@ -77,6 +83,13 @@ public class MainActivity extends AppCompatActivity {
         int rssi;
     }
 
+    public final static String ENABLE_DEVICE_UUID = "ffa1";
+    public final static String TIME_UUID = "ffa3";
+    public final static String DATA_UUID = "ffa4";
+    public final static String MAC_UUID = "ffa6";
+
+
+
     public ArrayList<DeviceDetail> deviceDetail;
 
     @Override
@@ -90,6 +103,7 @@ public class MainActivity extends AppCompatActivity {
             try {
                 Thread.sleep(10);
             } catch (Exception e) {
+                DisplayLog("Error: " + e.toString());
                 e.printStackTrace();
             }
         }
@@ -108,6 +122,7 @@ public class MainActivity extends AppCompatActivity {
         connectDeviceButton = (Button) findViewById(R.id.connectButton);
         connectDeviceButton.setOnClickListener(OnDeviceConnectButtonClicked);
         deviceRssiText = (TextView) findViewById(R.id.deviceRssiText);
+        logText = (TextView) findViewById(R.id.logText);
 
         if (mBluetoothAdapter == null || !mBluetoothAdapter.isEnabled()) {
             Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
@@ -134,15 +149,44 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onClick(View view) {
             Scan(true);
+
         }
     };
 
     private Button.OnClickListener OnDeviceConnectButtonClicked = new View.OnClickListener() {
         @Override
         public void onClick(View view) {
-            Connect(connectDeviceButton.getTag().toString());
+            if (!connectDeviceButton.getText().equals("CONNECT")) {
+                connectDeviceButton.setText("Connecting");
+                Connect(connectDeviceButton.getTag().toString());
+            }
+
+
         }
     };
+
+    private void updateStatus(final boolean connected) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (connected) {
+                    connectDeviceButton.setText("Connected");
+                } else {
+                    connectDeviceButton.setText("Connect");
+                }
+
+            }
+        });
+    }
+
+    private void DisplayLog(final String text) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                logText.setText(logText.getText() + "\n" + text);
+            }
+        });
+    }
 
     @Override
     protected void onResume() {
@@ -237,10 +281,13 @@ public class MainActivity extends AppCompatActivity {
         if (enable == mScanning)
             return false;
 
-        if (enable)
+        if (enable){
             mBluetoothAdapter.startLeScan(mLeScanResult);
-        else
+            DisplayLog("Start scan");
+        } else {
             mBluetoothAdapter.stopLeScan(mLeScanResult);
+            DisplayLog("Stop scan");
+        }
 
         mScanning = enable;
 
@@ -254,11 +301,11 @@ public class MainActivity extends AppCompatActivity {
         }
         Log("Connect()");
 
+
         mBonding = true;
-        mTaskQueue.reset();
 
         BluetoothDevice dev = mBluetoothAdapter.getRemoteDevice(mDeviceAddress);
-
+        DisplayLog("Connected Device. \nAddress: " + dev.getAddress() + "  Name: " + dev.getName());
         if (mBluetoothGatt != null && (mConnecting || mDiscovering)) {
             mBluetoothGatt.disconnect();
             mDiscovering = false;
@@ -272,37 +319,10 @@ public class MainActivity extends AppCompatActivity {
         return true;
     }
 
-    private final BroadcastReceiver mPairingRequestReceiver = new BroadcastReceiver() {
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            Log("Pairing request: " + action);
-            if (action.equals(BluetoothDevice.ACTION_PAIRING_REQUEST)) {
-
-                final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-
-                int type = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, BluetoothDevice.ERROR);
-
-                if (type == BluetoothDevice.PAIRING_VARIANT_PIN) {
-
-                    try{
-                        byte[] pin = (byte[]) BluetoothDevice.class.getMethod("convertPinToBytes", String.class).invoke(BluetoothDevice.class, "0000");
-                        device.setPin(pin);
-//                        abortBroadcast();
-                    }catch(Exception e){
-                        e.printStackTrace();
-                    }
-
-                }
-                else{
-                    Log("Unexpected pairing type: " + type);
-                }
-            }
-        }
-    };
-
     public boolean Connect(String address) {
         mDeviceAddress = address;
         Log("Connecting to " + mDeviceAddress);
+        DisplayLog("Connecting to " + mDeviceAddress);
         return Connect();
     }
 
@@ -323,12 +343,16 @@ public class MainActivity extends AppCompatActivity {
             switch (newState) {
                 case BluetoothProfile.STATE_DISCONNECTED:
                     Log("STATE_DISCONNECTED Address : " + gatt.getDevice().getAddress());
+                    DisplayLog("Disconnect from address: " + gatt.getDevice().getAddress());
+                    updateStatus(false);
                     mDiscovering = false;
                     break;
                 case BluetoothProfile.STATE_CONNECTED:
                     Log("STATE_CONNECTED Address : " + gatt.getDevice().getAddress());
+                    DisplayLog("Connected from address: " + gatt.getDevice().getAddress());
                     mDiscovering = true;
-                    boolean rssiStatus = mBluetoothGatt.readRemoteRssi();
+                    updateStatus(true);
+                    mBluetoothGatt.readRemoteRssi();
 
                     mBluetoothGatt.discoverServices();
                     break;
@@ -339,142 +363,232 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             mDiscovering = false;
-            gatt.getD
+            displayGattServices(gatt.getServices());
 
             Log("Discovered");
+
+            enableDevice();
+        }
+
+        private void displayGattServices(List<BluetoothGattService> gattServices) {
+            if (gattServices == null) return;
+
+            ArrayList<HashMap<String, String>> gattServiceData =
+                    new ArrayList<HashMap<String, String>>();
+            ArrayList<ArrayList<HashMap<String, String>>> gattCharacteristicData
+                    = new ArrayList<ArrayList<HashMap<String, String>>>();
+            mGattCharacteristics =
+                    new ArrayList<ArrayList<BluetoothGattCharacteristic>>();
+
+            String uuid = null;
+            for (BluetoothGattService gattService : gattServices) {
+                HashMap<String, String> currentServiceData =
+                        new HashMap<String, String>();
+                uuid = gattService.getUuid().toString();
+                gattServiceData.add(currentServiceData);
+
+                ArrayList<HashMap<String, String>> gattCharacteristicGroupData =
+                        new ArrayList<HashMap<String, String>>();
+                List<BluetoothGattCharacteristic> gattCharacteristics =
+                        gattService.getCharacteristics();
+                ArrayList<BluetoothGattCharacteristic> charas =
+                        new ArrayList<BluetoothGattCharacteristic>();
+
+
+//                if (uuid.contains("ffa0")) {
+                    Log("Service UUID: " + uuid);
+                    // Loops through available Characteristics.
+                    for (BluetoothGattCharacteristic gattCharacteristic :
+                            gattCharacteristics) {
+                        charas.add(gattCharacteristic);
+                        HashMap<String, String> currentCharaData =
+                                new HashMap<String, String>();
+                        uuid = gattCharacteristic.getUuid().toString();
+
+                        gattCharacteristicGroupData.add(currentCharaData);
+
+                        Log("Character UUID: " + uuid);
+                    }
+//                }
+
+                mGattCharacteristics.add(charas);
+                gattCharacteristicData.add(gattCharacteristicGroupData);
+            }
+        }
+
+        private void enableDevice() {
+            for (ArrayList<BluetoothGattCharacteristic> gattCharacteristics : mGattCharacteristics) {
+
+                for (BluetoothGattCharacteristic gattCharacteristic : gattCharacteristics) {
+                    String uuid = gattCharacteristic.getUuid().toString();
+                    if (uuid.contains(ENABLE_DEVICE_UUID)) {
+                        DisplayLog("Enable Device: Writing 1 to: " + uuid);
+                        try {
+                            byte[] data = new byte[1];
+                            data[0] = 0x01;
+
+                            gattCharacteristic.setValue(data);
+                            mBluetoothGatt.writeCharacteristic(gattCharacteristic);
+
+                        } catch (Exception e) {
+                            DisplayLog("Error: " + e.toString());
+                            e.printStackTrace();
+                        }
+
+                    }
+                }
+
+            }
+        }
+
+        private void getMacID() {
+            for (ArrayList<BluetoothGattCharacteristic> gattCharacteristics : mGattCharacteristics) {
+
+                for (BluetoothGattCharacteristic gattCharacteristic : gattCharacteristics) {
+                    String uuid = gattCharacteristic.getUuid().toString();
+                    if (uuid.contains(MAC_UUID)) {
+                        Log("Read value to: " + uuid);
+                        DisplayLog("Getting MAC ID from: " + uuid);
+                        mBluetoothGatt.readCharacteristic(gattCharacteristic);
+
+                    }
+                }
+
+            }
+        }
+
+        private void sendTimestamp(){
+            for (ArrayList<BluetoothGattCharacteristic> gattCharacteristics : mGattCharacteristics) {
+
+                for (BluetoothGattCharacteristic gattCharacteristic : gattCharacteristics) {
+                    String uuid = gattCharacteristic.getUuid().toString();
+                    if (uuid.contains(TIME_UUID)) {
+                        int unixTime = (int)(System.currentTimeMillis() / 1000);
+//                        String hex = Integer.toHexString(unixTime);
+//                        byte[] byteTime = hexStringToByteArray(hex);
+                        Log("Send timestamp to: " + uuid + "  Timestamp: " + unixTime);
+                        DisplayLog("Send timestamp to: " + uuid + "  Timestamp: " + unixTime);
+                        byte[] timestampBytes = longToBytes(unixTime);
+                        Log("Bytes: " + timestampBytes.length);
+                        gattCharacteristic.setValue(timestampBytes);
+                        mBluetoothGatt.writeCharacteristic(gattCharacteristic);
+
+                    }
+                }
+
+            }
         }
 
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-/*            if (mEventListener != null) {
-                UUID uuidServ = characteristic.getService().getUuid();
-                UUID uuidChar = characteristic.getUuid();
-                byte[] value = characteristic.getValue();
-                mEventListener.onCharacteristicRead(uuidServ, uuidChar, value);
-            }*/
-            mTaskQueue.pop(true);
+
+            UUID uuidServ = characteristic.getService().getUuid();
+            UUID uuidChar = characteristic.getUuid();
+            byte[] value = characteristic.getValue();
+            Log("On Characters Read. Service: " + uuidServ.toString() + "   Character: " + uuidChar.toString() + " Status: " + status);
+            try {
+                if(uuidChar.toString().contains(MAC_UUID)) {
+                    String macId = bytesToHex(value);
+                    DisplayLog("Mac ID: " + macId);
+
+                }
+
+            } catch(Exception e ) {
+                DisplayLog("Error: " + e.toString());
+                e.printStackTrace();
+            }
+
         }
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-/*            if (mEventListener != null) {
-                UUID uuidServ = characteristic.getService().getUuid();
-                UUID uuidChar = characteristic.getUuid();
-                byte[] value = characteristic.getValue();
-                mEventListener.onCharacteristicChange(uuidServ, uuidChar, value);
-            }*/
+            UUID uuidServ = characteristic.getService().getUuid();
+            UUID uuidChar = characteristic.getUuid();
+            Log("On Characters Changed. Service: " + uuidServ.toString() + "   Character: " + uuidChar.toString());
         }
 
         @Override
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-/*            if (mEventListener != null) {
-                UUID uuidServ = characteristic.getService().getUuid();
-                UUID uuidChar = characteristic.getUuid();
-                mEventListener.onCharacteristicWrite(uuidServ, uuidChar);
-            }*/
+            UUID uuidServ = characteristic.getService().getUuid();
+            UUID uuidChar = characteristic.getUuid();
+            Log("On Characters Write. Service: " + uuidServ.toString() + "   Character: " + uuidChar.toString() + " Status: " + status);
 
-            mTaskQueue.pop(true);
+            if(uuidChar.toString().contains(ENABLE_DEVICE_UUID)) {
+                sendTimestamp();
+            } else if(uuidChar.toString().contains(TIME_UUID)) {
+                getMacID();
+            }
+
         }
 
         @Override
         public void onDescriptorRead(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-            mTaskQueue.pop(true);
+
         }
 
         @Override
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-            mTaskQueue.push(new DeviceAccessQueueItem(descriptor, false));
-            mTaskQueue.pop(true);
+
         }
 
         @Override
         public void onReadRemoteRssi(BluetoothGatt gatt, int rssi, int status) {
             Log("On read remote RSSI:" + rssi);
-            deviceRssiText.setText(String.valueOf(rssi));
-
-/*            if (mEventListener != null) {
-                mEventListener.onRssiUpdate(rssi);
-            }*/
+            DisplayLog("Read RSSI: " + rssi);
+            final int finalRssi = rssi;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    deviceRssiText.setText(String.valueOf(finalRssi));
+                }
+            });
         }
 
     };
 
-    private class DeviceAccessQueueItem {
-        Object mObject;
-        boolean mWrite;
-
-        DeviceAccessQueueItem(Object o, boolean write) {
-            mObject = o;
-            mWrite = write;
-        }
-    }
-
-    private class TaskQueue {
-        boolean mDeviceAccess = false;
-        Queue<DeviceAccessQueueItem> mDeviceAccessQueue = new ConcurrentLinkedQueue<>();
-        long mDeviceAccessTick = 0;
-
-        void reset() {
-            mDeviceAccess = false;
-            mDeviceAccessQueue.clear();
-            mDeviceAccessTick = 0;
-        }
-
-        synchronized void push(DeviceAccessQueueItem item) {
-            mDeviceAccessQueue.add(item);
-            pop(false);
-        }
-
-        synchronized void pop(boolean accessDone) {
-            if (accessDone)
-                mDeviceAccess = false;
-
-            if (!mDeviceAccessQueue.isEmpty() && !mDeviceAccess) {
-                mDeviceAccess = access(mDeviceAccessQueue.poll());
-                mDeviceAccessTick = System.currentTimeMillis();
-            } else if (!mDeviceAccessQueue.isEmpty()) {
-                if (System.currentTimeMillis() - mDeviceAccessTick > 2000) {
-                    Log("Blocked! Purge queue!");
-                    mDeviceAccess = false;
-                    mDeviceAccessQueue.clear();
-                }
-            }
-        }
-
-        synchronized boolean access(DeviceAccessQueueItem item) {
-            if (item.mObject instanceof BluetoothGattCharacteristic) {
-
-                if (item.mWrite) {
-                    //Log("WRITE : " + ((BluetoothGattCharacteristic)item.mObject).getUuid().toString());
-                    mBluetoothGatt.writeCharacteristic((BluetoothGattCharacteristic) item.mObject);
-                } else {
-                    //Log("READ : " + ((BluetoothGattCharacteristic)item.mObject).getUuid().toString());
-                    mBluetoothGatt.readCharacteristic((BluetoothGattCharacteristic) item.mObject);
-                }
-
-                return true;
-            } else if (item.mObject instanceof BluetoothGattDescriptor) {
-
-                if (item.mWrite) {
-                    mBluetoothGatt.writeDescriptor((BluetoothGattDescriptor) item.mObject);
-                } else {
-                    mBluetoothGatt.readDescriptor((BluetoothGattDescriptor) item.mObject);
-                }
-
-                return true;
-            } else {
-                Log("Invalid item!");
-            }
-
-            return false;
-        }
-
-    }
-
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        unregisterReceiver(mPairingRequestReceiver);
         unregisterReceiver(mBroadcastReceiver);
     }
+
+    public static byte[] hexStringToByteArray(String s) {
+        int len = s.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
+                    + Character.digit(s.charAt(i+1), 16));
+        }
+        return data;
+    }
+
+    final protected static char[] hexArray = "0123456789ABCDEF".toCharArray();
+    public static String bytesToHex(byte[] bytes) {
+        char[] hexChars = new char[bytes.length * 2];
+        for ( int j = 0; j < bytes.length; j++ ) {
+            int v = bytes[j] & 0xFF;
+            hexChars[j * 2] = hexArray[v >>> 4];
+            hexChars[j * 2 + 1] = hexArray[v & 0x0F];
+        }
+        return new String(hexChars);
+    }
+
+
+    public byte[] longToBytes(int unixTime) {
+        return new byte[]{
+                (byte) (unixTime >> 24),
+                (byte) (unixTime >> 16),
+                (byte) (unixTime >> 8),
+                (byte) unixTime
+
+        };
+//        return ByteBuffer.allocate(4).putInt(unixTime).array();
+    }
+/*
+    public long bytesToLong(byte[] bytes) {
+        ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
+        buffer.put(bytes);
+        buffer.flip();//need flip
+        return buffer.getLong();
+    }*/
 }
