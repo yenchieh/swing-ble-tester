@@ -12,7 +12,7 @@
     tools:context="com.kidsdynamic.swingbletester.MainActivity">
 
     <Button
-        android:text="Find Device"
+        android:text="Start Testing"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerHorizontal="true"
@@ -27,13 +27,6 @@
         android:orientation="horizontal"
         android:layout_below="@+id/findDeviceButton">
 
-        <Button
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Connect"
-            android:id="@+id/connectButton"
-            />
-
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -44,6 +37,40 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Error:"/>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/colorAccent"
+                    android:id="@+id/errorMessage"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Status:"/>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:id="@+id/deviceStatus"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingTop="5dp"
+                android:orientation="horizontal">
+
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -70,16 +97,6 @@
                     android:id="@+id/deviceAddressText"/>
 
             </LinearLayout>
-
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:padding="5dp"
-            android:paddingLeft="10dp"
-            android:orientation="vertical">
-
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -96,23 +113,25 @@
                     android:id="@+id/deviceRssiText"/>
 
             </LinearLayout>
-
-
-
-
-
         </LinearLayout>
 
 
     </LinearLayout>
 
     <ScrollView
+        android:id="@+id/logScroll"
+        android:focusable="true"
+        android:focusableInTouchMode="true"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:background="#1E252B"
+        android:paddingStart="5dp"
         android:layout_below="@+id/deviceList">
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:background="#1E252B"
+            android:textColor="#ffffff"
             android:id="@+id/logText"/>
     </ScrollView>
     

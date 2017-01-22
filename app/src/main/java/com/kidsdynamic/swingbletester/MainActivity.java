@@ -10,50 +10,56 @@ import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
-import android.bluetooth.le.BluetoothLeScanner;
-import android.bluetooth.le.ScanCallback;
-import android.bluetooth.le.ScanFilter;
-import android.bluetooth.le.ScanResult;
-import android.bluetooth.le.ScanSettings;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
+import android.support.v4.util.ArrayMap;
 import android.support.v7.app.AppCompatActivity;
-import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.w3c.dom.Text;
+import com.android.volley.AuthFailureError;
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.JsonObjectRequest;
+import com.android.volley.toolbox.StringRequest;
+import com.android.volley.toolbox.Volley;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.nio.ByteBuffer;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Queue;
+import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class MainActivity extends AppCompatActivity {
 
     Button findDeviceButton;
-    Button connectDeviceButton;
     TextView deviceNameText;
     TextView deviceAddressText;
     TextView deviceRssiText;
     TextView logText;
+    ScrollView logScroll;
+    TextView deviceStatus;
+    TextView errorMessage;
 
 
     private int REQUEST_ENABLE_BT = 1;
@@ -66,6 +72,10 @@ public class MainActivity extends AppCompatActivity {
     private boolean mConnecting = false;
     private boolean mDiscovering = false;
     private ArrayList<ArrayList<BluetoothGattCharacteristic>> mGattCharacteristics;
+    private Handler handler;
+    private boolean mConnected;
+    private List<String> foundDevice;
+    private String deviceAddress;
 
     public final static int BLUETOOTH_PERMISSION = 0x1000;
     public final static int BLUETOOTH_ADMIN_PERMISSION = 0x1001;
@@ -87,7 +97,8 @@ public class MainActivity extends AppCompatActivity {
     public final static String TIME_UUID = "ffa3";
     public final static String DATA_UUID = "ffa4";
     public final static String MAC_UUID = "ffa6";
-
+    public final static String TEST_START_UUID = "ffae";
+    public final static String TEST_DATA_UUID = "ffaf";
 
 
     public ArrayList<DeviceDetail> deviceDetail;
@@ -96,6 +107,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        Log("SDK INT: " + Build.VERSION.SDK_INT);
 
         mBluetoothAdapter = ((BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE)).getAdapter();
         while (!mBluetoothAdapter.isEnabled()) {
@@ -116,13 +129,18 @@ public class MainActivity extends AppCompatActivity {
         mBluetoothAdapter = bluetoothManager.getAdapter();
         findDeviceButton = (Button) findViewById(R.id.findDeviceButton);
         findDeviceButton.setOnClickListener(OnDeviceButtonClicked);
+        deviceStatus = (TextView) findViewById(R.id.deviceStatus);
+        errorMessage = (TextView) findViewById(R.id.errorMessage);
+
+        handler = new Handler();
 
         deviceNameText = (TextView) findViewById(R.id.deviceNameText);
         deviceAddressText = (TextView) findViewById(R.id.deviceAddressText);
-        connectDeviceButton = (Button) findViewById(R.id.connectButton);
-        connectDeviceButton.setOnClickListener(OnDeviceConnectButtonClicked);
         deviceRssiText = (TextView) findViewById(R.id.deviceRssiText);
         logText = (TextView) findViewById(R.id.logText);
+        logScroll = (ScrollView) findViewById(R.id.logScroll);
+
+        foundDevice = new ArrayList<>();
 
         if (mBluetoothAdapter == null || !mBluetoothAdapter.isEnabled()) {
             Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
@@ -143,22 +161,45 @@ public class MainActivity extends AppCompatActivity {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_PRIVILEGED) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{android.Manifest.permission.BLUETOOTH_PRIVILEGED}, BLUETOOTH_PRIVILEGED_PERMISSION);
         }
+
+
+/*        try{
+            checkMacID("60:64:05:86:2D:E7");
+        }catch(Exception e) {
+            e.printStackTrace();
+            DisplayLog("Error on request checkMacID");
+        }*/
+
     }
+
+
 
     private Button.OnClickListener OnDeviceButtonClicked = new View.OnClickListener() {
         @Override
         public void onClick(View view) {
-            Scan(true);
+            if (!findDeviceButton.getText().toString().equals("Stop testing")) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        findDeviceButton.setText("Stop testing");
+                    }
+                });
 
-        }
-    };
+                Scan(true);
+            } else {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        findDeviceButton.setText("Start testing");
+                    }
+                });
+                cleanData();
 
-    private Button.OnClickListener OnDeviceConnectButtonClicked = new View.OnClickListener() {
-        @Override
-        public void onClick(View view) {
-            if (!connectDeviceButton.getText().equals("CONNECT")) {
-                connectDeviceButton.setText("Connecting");
-                Connect(connectDeviceButton.getTag().toString());
+                if (mBluetoothGatt != null) {
+                    mBluetoothGatt.disconnect();
+                }
+
+                Scan(false);
             }
 
 
@@ -170,9 +211,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void run() {
                 if (connected) {
-                    connectDeviceButton.setText("Connected");
+                    mConnected = true;
+                    deviceStatus.setText("Connected");
                 } else {
-                    connectDeviceButton.setText("Connect");
+                    mConnected = false;
+                    deviceStatus.setText("Connect");
                 }
 
             }
@@ -186,6 +229,25 @@ public class MainActivity extends AppCompatActivity {
                 logText.setText(logText.getText() + "\n" + text);
             }
         });
+
+
+        logScroll.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                logScroll.fullScroll(ScrollView.FOCUS_DOWN);
+
+            }
+        }, 1000);
+    }
+
+    private void updateErrorMessage(final String text){
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                errorMessage.setText(text);
+            }
+        });
+
     }
 
     @Override
@@ -253,35 +315,124 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onLeScan(final BluetoothDevice device, int rssi, byte[] scanRecord) {
 
-            String name = device.getName();
-            String address = device.getAddress();
+            final String name = device.getName();
+            final String address = device.getAddress();
 
-            if (name == null || address == null)
-                return;
 
-            Scan(false);
+            boolean alreadyExist = false;
+            for (String d : foundDevice) {
+                if (d.equals(address)) {
+                    alreadyExist = true;
+                    break;
+                }
+            }
 
-            DeviceDetail newDevice = new DeviceDetail();
-            newDevice.name = device.getName();
-            newDevice.address = device.getAddress();
+            if (!alreadyExist) {
+                foundDevice.add(address);
 
-            deviceDetail.add(newDevice);
+                DisplayLog("Found Device Name: " + name + "  Address: " + address);
+                if (name == null || address == null)
+                    return;
 
-            deviceNameText.setText(newDevice.name);
-            deviceAddressText.setText(newDevice.address);
-            connectDeviceButton.setTag(newDevice.address);
+                final int rssii = rssi;
 
-            Log("Device Name: " + name + " Device Address: " + address);
+                if (name.contains("SWING")) {
+//                    Scan(false);
+
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            deviceRssiText.setText(String.valueOf(rssii));
+                            deviceNameText.setText(name);
+                            deviceAddressText.setText(address);
+                        }
+                    });
+
+                    DisplayLog("Found - Device Name: " + name + " Device Address: " + address);
+
+
+                    deviceAddress = device.getAddress();
+                    try{
+                        checkMacID(device.getAddress());
+                        Scan(false);
+                    } catch(Exception e){
+                        updateErrorMessage(e.getMessage());
+                    }
+
+                }
+
+            }
+
 
         }
     };
 
+    public void checkMacID(String macId) throws Exception {
+        RequestQueue queue = Volley.newRequestQueue(this);
+        String url ="https://childrenlab.com:8110/api/checkMacId?mac_id=" + macId;
+
+        StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
+                new Response.Listener<String>() {
+                    @Override
+                    public void onResponse(String response) {
+
+                        //Success response
+                        Connect(deviceAddress);
+                    }
+                }, new Response.ErrorListener() {
+            @Override
+            public void onErrorResponse(VolleyError error) {
+                DisplayLog("That didn't work");
+                updateErrorMessage("The Mac ID doesn't exist on childrenlab database");
+            }
+        }){
+            @Override
+            public Map<String, String> getHeaders() throws AuthFailureError {
+                Map<String, String>  params = new HashMap<>();
+                params.put("X-AUTH-TOKEN", "50ddcb9f1da9b08c2892ba58b694859e");
+                return params;
+            }
+        };
+// Add the request to the RequestQueue.
+        queue.add(stringRequest);
+
+    }
+
+    public void uploadResult(String macId, boolean success) throws Exception {
+        RequestQueue queue = Volley.newRequestQueue(this);
+        String url ="https://childrenlab.com:8110/api/final";
+        final JSONObject jsonBody = new JSONObject("{\"mac_id\":\"" + macId + "\", \"result\":" + success + "}");
+
+        JsonObjectRequest request = new JsonObjectRequest(Request.Method.POST, url, jsonBody, new Response.Listener<JSONObject>() {
+            @Override
+            public void onResponse(JSONObject response) {
+
+                //Success response
+                DisplayLog("Upload to backend successfully");
+                findDeviceButton.callOnClick();
+            }
+        }, new Response.ErrorListener() {
+            @Override
+            public void onErrorResponse(VolleyError error) {
+                DisplayLog("upload result error");
+                updateErrorMessage("Error on uploading test result");
+            }
+        }){
+            @Override
+            public Map<String, String> getHeaders() throws AuthFailureError {
+                Map<String, String>  params = new HashMap<>();
+                params.put("X-AUTH-TOKEN", "50ddcb9f1da9b08c2892ba58b694859e");
+                return params;
+            }
+        };
+// Add the request to the RequestQueue.
+        queue.add(request);
+
+    }
+
     public boolean Scan(boolean enable) {
 
-        if (enable == mScanning)
-            return false;
-
-        if (enable){
+        if (enable) {
             mBluetoothAdapter.startLeScan(mLeScanResult);
             DisplayLog("Start scan");
         } else {
@@ -321,7 +472,6 @@ public class MainActivity extends AppCompatActivity {
 
     public boolean Connect(String address) {
         mDeviceAddress = address;
-        Log("Connecting to " + mDeviceAddress);
         DisplayLog("Connecting to " + mDeviceAddress);
         return Connect();
     }
@@ -346,14 +496,13 @@ public class MainActivity extends AppCompatActivity {
                     DisplayLog("Disconnect from address: " + gatt.getDevice().getAddress());
                     updateStatus(false);
                     mDiscovering = false;
+                    cleanData();
                     break;
                 case BluetoothProfile.STATE_CONNECTED:
                     Log("STATE_CONNECTED Address : " + gatt.getDevice().getAddress());
                     DisplayLog("Connected from address: " + gatt.getDevice().getAddress());
                     mDiscovering = true;
                     updateStatus(true);
-                    mBluetoothGatt.readRemoteRssi();
-
                     mBluetoothGatt.discoverServices();
                     break;
             }
@@ -363,56 +512,84 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
             mDiscovering = false;
+
             displayGattServices(gatt.getServices());
 
             Log("Discovered");
 
-            enableDevice();
+            enableTest();
         }
 
         private void displayGattServices(List<BluetoothGattService> gattServices) {
             if (gattServices == null) return;
 
-            ArrayList<HashMap<String, String>> gattServiceData =
-                    new ArrayList<HashMap<String, String>>();
-            ArrayList<ArrayList<HashMap<String, String>>> gattCharacteristicData
-                    = new ArrayList<ArrayList<HashMap<String, String>>>();
-            mGattCharacteristics =
-                    new ArrayList<ArrayList<BluetoothGattCharacteristic>>();
+            mGattCharacteristics = new ArrayList<>();
 
             String uuid = null;
             for (BluetoothGattService gattService : gattServices) {
-                HashMap<String, String> currentServiceData =
-                        new HashMap<String, String>();
                 uuid = gattService.getUuid().toString();
-                gattServiceData.add(currentServiceData);
 
-                ArrayList<HashMap<String, String>> gattCharacteristicGroupData =
-                        new ArrayList<HashMap<String, String>>();
                 List<BluetoothGattCharacteristic> gattCharacteristics =
                         gattService.getCharacteristics();
-                ArrayList<BluetoothGattCharacteristic> charas =
-                        new ArrayList<BluetoothGattCharacteristic>();
+                ArrayList<BluetoothGattCharacteristic> charas = new ArrayList<>();
 
 
-//                if (uuid.contains("ffa0")) {
-                    Log("Service UUID: " + uuid);
+                if (uuid.contains("ffa0")) {
                     // Loops through available Characteristics.
                     for (BluetoothGattCharacteristic gattCharacteristic :
                             gattCharacteristics) {
+
                         charas.add(gattCharacteristic);
-                        HashMap<String, String> currentCharaData =
-                                new HashMap<String, String>();
                         uuid = gattCharacteristic.getUuid().toString();
 
-                        gattCharacteristicGroupData.add(currentCharaData);
 
                         Log("Character UUID: " + uuid);
                     }
-//                }
+                }
 
                 mGattCharacteristics.add(charas);
-                gattCharacteristicData.add(gattCharacteristicGroupData);
+            }
+        }
+
+        private void enableTest() {
+            for (ArrayList<BluetoothGattCharacteristic> gattCharacteristics : mGattCharacteristics) {
+                for (BluetoothGattCharacteristic gattCharacteristic : gattCharacteristics) {
+                    String uuid = gattCharacteristic.getUuid().toString();
+                    if (uuid.contains(TEST_START_UUID)) {
+                        DisplayLog("Enable TEST Device: Writing 0x54, 0x33, 0x45 to: " + uuid);
+                        try {
+                            byte[] data = new byte[3];
+                            data[0] = 0x54;
+                            data[1] = 0x33;
+                            data[2] = 0x45;
+
+                            gattCharacteristic.setValue(data);
+                            mBluetoothGatt.writeCharacteristic(gattCharacteristic);
+
+                        } catch (Exception e) {
+                            DisplayLog("Error: " + e.toString());
+                            e.printStackTrace();
+                        }
+
+                    }
+                }
+            }
+        }
+
+        private void readTestData() {
+            for (ArrayList<BluetoothGattCharacteristic> gattCharacteristics : mGattCharacteristics) {
+
+                for (BluetoothGattCharacteristic gattCharacteristic : gattCharacteristics) {
+                    String uuid = gattCharacteristic.getUuid().toString();
+                    if (uuid.contains(TEST_DATA_UUID)) {
+                        Log("Read value from: " + uuid);
+                        DisplayLog("Getting Test data from: " + uuid);
+
+                        mBluetoothGatt.readCharacteristic(gattCharacteristic);
+
+                    }
+                }
+
             }
         }
 
@@ -457,13 +634,13 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        private void sendTimestamp(){
+        private void sendTimestamp() {
             for (ArrayList<BluetoothGattCharacteristic> gattCharacteristics : mGattCharacteristics) {
 
                 for (BluetoothGattCharacteristic gattCharacteristic : gattCharacteristics) {
                     String uuid = gattCharacteristic.getUuid().toString();
                     if (uuid.contains(TIME_UUID)) {
-                        int unixTime = (int)(System.currentTimeMillis() / 1000);
+                        int unixTime = (int) (System.currentTimeMillis() / 1000);
 //                        String hex = Integer.toHexString(unixTime);
 //                        byte[] byteTime = hexStringToByteArray(hex);
                         Log("Send timestamp to: " + uuid + "  Timestamp: " + unixTime);
@@ -487,13 +664,31 @@ public class MainActivity extends AppCompatActivity {
             byte[] value = characteristic.getValue();
             Log("On Characters Read. Service: " + uuidServ.toString() + "   Character: " + uuidChar.toString() + " Status: " + status);
             try {
-                if(uuidChar.toString().contains(MAC_UUID)) {
+                if (uuidChar.toString().contains(MAC_UUID)) {
                     String macId = bytesToHex(value);
                     DisplayLog("Mac ID: " + macId);
 
+                } else if (uuidChar.toString().contains(TEST_DATA_UUID)) {
+                    StringBuilder s = new StringBuilder();
+                    if (value == null) {
+                        DisplayLog("Read Null Value From UUID: " + uuidChar);
+                        return;
+                    }
+                    s.append(" - Bytes Size - : " + value.length + "\n");
+                    for (int i = 0; i < value.length; i++) {
+//                        DisplayLog(" -- Byte[" + i + "]: " + value[i]);
+                        s.append(" -- Byte[" + i + "]: " + value[i] + "\n");
+                    }
+
+                    s.append(" -- Hex: " + bytesToHex(value) + "\n");
+                    DisplayLog(s.toString());
+                    DisplayLog("--------Success Testing -------");
+                    mBluetoothGatt.disconnect();
+                    uploadResult(deviceAddress, true);
+
                 }
 
-            } catch(Exception e ) {
+            } catch (Exception e) {
                 DisplayLog("Error: " + e.toString());
                 e.printStackTrace();
             }
@@ -513,10 +708,18 @@ public class MainActivity extends AppCompatActivity {
             UUID uuidChar = characteristic.getUuid();
             Log("On Characters Write. Service: " + uuidServ.toString() + "   Character: " + uuidChar.toString() + " Status: " + status);
 
-            if(uuidChar.toString().contains(ENABLE_DEVICE_UUID)) {
+            if (uuidChar.toString().contains(ENABLE_DEVICE_UUID)) {
                 sendTimestamp();
-            } else if(uuidChar.toString().contains(TIME_UUID)) {
+            } else if (uuidChar.toString().contains(TIME_UUID)) {
                 getMacID();
+            } else if (uuidChar.toString().contains(TEST_START_UUID)) {
+                final Runnable r = new Runnable() {
+                    @Override
+                    public void run() {
+                        readTestData();
+                    }
+                };
+                handler.postDelayed(r, 2000);
             }
 
         }
@@ -546,10 +749,32 @@ public class MainActivity extends AppCompatActivity {
 
     };
 
+    private void cleanData() {
+
+        foundDevice.clear();
+        deviceAddress = null;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                deviceNameText.setText("");
+                deviceAddressText.setText("");
+                deviceRssiText.setText("");
+                deviceStatus.setText("");
+            }
+        });
+
+//            Scan(true);
+    }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        unregisterReceiver(mBroadcastReceiver);
+        try {
+            unregisterReceiver(mBroadcastReceiver);
+        } catch (Exception e) {
+            Log("Error on destroy");
+        }
+
     }
 
     public static byte[] hexStringToByteArray(String s) {
@@ -557,15 +782,16 @@ public class MainActivity extends AppCompatActivity {
         byte[] data = new byte[len / 2];
         for (int i = 0; i < len; i += 2) {
             data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
-                    + Character.digit(s.charAt(i+1), 16));
+                    + Character.digit(s.charAt(i + 1), 16));
         }
         return data;
     }
 
     final protected static char[] hexArray = "0123456789ABCDEF".toCharArray();
+
     public static String bytesToHex(byte[] bytes) {
         char[] hexChars = new char[bytes.length * 2];
-        for ( int j = 0; j < bytes.length; j++ ) {
+        for (int j = 0; j < bytes.length; j++) {
             int v = bytes[j] & 0xFF;
             hexChars[j * 2] = hexArray[v >>> 4];
             hexChars[j * 2 + 1] = hexArray[v & 0x0F];
