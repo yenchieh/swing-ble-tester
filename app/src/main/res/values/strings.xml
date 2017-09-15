@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">Swing BLE Tester</string>
+
+    <string name="company_placeholder">Choose a company</string>
+    <string-array name="company_array">
+        <item>Japanese Company</item>
+        <item>Other Company</item>
+    </string-array>
+
 </resources>

@@ -26,8 +26,10 @@ import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Display;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -60,6 +62,7 @@ public class MainActivity extends AppCompatActivity {
     ScrollView logScroll;
     TextView deviceStatus;
     TextView errorMessage;
+    Spinner companySelector;
 
 
     private int REQUEST_ENABLE_BT = 1;
@@ -139,6 +142,12 @@ public class MainActivity extends AppCompatActivity {
         deviceRssiText = (TextView) findViewById(R.id.deviceRssiText);
         logText = (TextView) findViewById(R.id.logText);
         logScroll = (ScrollView) findViewById(R.id.logScroll);
+        companySelector = (Spinner) findViewById(R.id.companySelector);
+
+        ArrayAdapter<CharSequence> adapter = ArrayAdapter.createFromResource(this,
+                R.array.company_array, android.R.layout.simple_spinner_item);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        companySelector.setAdapter(adapter);
 
         foundDevice = new ArrayList<>();
 
@@ -353,7 +362,8 @@ public class MainActivity extends AppCompatActivity {
 
                     deviceAddress = device.getAddress();
                     try{
-                        checkMacID(device.getAddress());
+//                        checkMacID(device.getAddress());
+                        Connect(deviceAddress);
                         Scan(false);
                     } catch(Exception e){
                         updateErrorMessage(e.getMessage());
@@ -398,11 +408,18 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-    public void uploadResult(String macId, boolean success) throws Exception {
+    public void uploadResult(String macId, byte[] resultData, boolean success) throws Exception {
         RequestQueue queue = Volley.newRequestQueue(this);
         String url ="https://childrenlab.com:8110/api/final";
-        final JSONObject jsonBody = new JSONObject("{\"mac_id\":\"" + macId + "\", \"result\":" + success + "}");
 
+        final JSONObject jsonBody = new JSONObject("{\"mac_id\":\"" + macId + "\", \"x_max\":\"" + resultData[0] +
+                "\", \"x_min\":\"" + resultData[1] + "\", \"y_max\":\"" + resultData[2] +
+                "\", \"y_min\":\"" + resultData[3] + "\" , \"uv_max\":\"" + (resultData[4] + "" + resultData[5]) +
+                "\", \"uv_min\":\"" + (resultData[5] + " " + resultData[6]) +
+                "\", \"company\":\"" + companySelector.getSelectedItem().toString() +
+                "\", \"mac_id\":\"" + macId + "\", \"result\":" + success + "}");
+        DisplayLog(jsonBody.toString());
+        Log.d("Uploading", jsonBody.toString());
         JsonObjectRequest request = new JsonObjectRequest(Request.Method.POST, url, jsonBody, new Response.Listener<JSONObject>() {
             @Override
             public void onResponse(JSONObject response) {
@@ -414,6 +431,7 @@ public class MainActivity extends AppCompatActivity {
         }, new Response.ErrorListener() {
             @Override
             public void onErrorResponse(VolleyError error) {
+                error.printStackTrace();
                 DisplayLog("upload result error");
                 updateErrorMessage("Error on uploading test result");
             }
@@ -680,11 +698,11 @@ public class MainActivity extends AppCompatActivity {
                         s.append(" -- Byte[" + i + "]: " + value[i] + "\n");
                     }
 
-                    s.append(" -- Hex: " + bytesToHex(value) + "\n");
+//                    s.append(" -- Hex: " + bytesToHex(value) + "\n");
                     DisplayLog(s.toString());
                     DisplayLog("--------Success Testing -------");
                     mBluetoothGatt.disconnect();
-                    uploadResult(deviceAddress, true);
+                    uploadResult(deviceAddress, value, true);
 
                 }
 
